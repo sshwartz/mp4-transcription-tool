@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-MP4 Transcription Tool - A Python CLI application that transcribes audio from video files using OpenAI's Whisper model running locally. The tool extracts audio from MP4 files using ffmpeg, processes it through Whisper for speech-to-text conversion, and outputs transcriptions in multiple formats (TXT, SRT, VTT, JSON).
+MP4 Transcription Tool - A Python CLI application that transcribes audio from video files using OpenAI's Whisper model running locally. The tool extracts audio from MP4 files using ffmpeg, processes it through Whisper for speech-to-text conversion, and outputs transcriptions in multiple formats (TXT, SRT, VTT, JSON). Supports speaker diarization via pyannote.audio and Zoom participant name extraction via OCR.
 
 ## Development Commands
 
@@ -58,18 +58,26 @@ The entire application is contained in `transcribe.py` with a function-based mod
 **Processing Pipeline:**
 1. **Input Validation** (`main`) → Verify file exists, check dependencies
 2. **Audio Extraction** (`extract_audio`) → ffmpeg extracts audio to temporary WAV file (16kHz mono PCM)
-3. **Transcription** (`transcribe_audio`) → Whisper model processes audio
-4. **Output Formatting** (`save_txt/srt/vtt/json`) → Save results in requested format
-5. **Cleanup** → Remove temporary files (always executed in finally block)
+3. **Transcription** (`transcribe_audio`) → Whisper model processes audio on CPU or GPU
+4. **Speaker Diarization** (`diarize_audio`) → pyannote.audio identifies speakers (optional, requires HF token)
+5. **Speaker Assignment** (`assign_speakers_to_segments`) → Maps diarization results to transcription segments by timestamp overlap
+6. **Zoom Name Extraction** (`extract_zoom_names`) → OCR extracts participant names from video frames (optional)
+7. **Name Mapping** (`map_zoom_names_to_speakers`) → Replaces SPEAKER_XX IDs with real names
+8. **Output Formatting** (`save_txt/srt/vtt/json`) → Save results in requested format with speaker labels
+9. **Cleanup** → Remove temporary files (always executed in finally block)
 
 **Key Functions:**
 
 - **`check_ffmpeg()`** - Validates ffmpeg installation with helpful error messages per OS
 - **`extract_audio(video_path, output_path)`** - Uses ffmpeg-python to convert video to 16kHz mono WAV (Whisper's optimal format)
-- **`transcribe_audio(audio_path, model_name, language)`** - Loads Whisper model and transcribes, handles auto language detection
-- **`format_timestamp(seconds)` / `format_timestamp_vtt(seconds)`** - Convert float seconds to subtitle timestamp formats (SRT vs VTT have different formats)
-- **`save_txt/srt/vtt/json(result, output_path)`** - Format-specific output handlers
-- **`main()`** - CLI orchestration using argparse, manages temporary files
+- **`transcribe_audio(audio_path, model_name, language, device)`** - Loads Whisper model and transcribes, handles auto language detection and GPU/CPU selection
+- **`diarize_audio(audio_path, hf_token, device)`** - Speaker diarization using pyannote.audio pipeline, requires Hugging Face token
+- **`assign_speakers_to_segments(transcription, speaker_segments)`** - Assigns speaker labels to transcription segments using midpoint overlap matching
+- **`extract_zoom_names(video_path, device, verbose)`** - OCR-based name extraction from Zoom video; crops bottom 20% of frames, samples every 15s, stops early when names stabilize
+- **`map_zoom_names_to_speakers(transcription, zoom_names)`** - Replaces SPEAKER_XX IDs with OCR-detected names
+- **`format_timestamp(seconds)` / `format_timestamp_vtt(seconds)` / `format_timestamp_simple(seconds)`** - Convert float seconds to subtitle/display timestamp formats
+- **`save_txt/srt/vtt/json(result, output_path)`** - Format-specific output handlers with optional speaker labels
+- **`main()`** - CLI orchestration using argparse, manages temporary files and processing pipeline
 
 ### Dependencies
 
@@ -77,6 +85,9 @@ The entire application is contained in `transcribe.py` with a function-based mod
 - **openai-whisper** - Core transcription engine (speech-to-text model)
 - **ffmpeg-python** - Python bindings for ffmpeg (audio extraction)
 - **torch/torchaudio** - PyTorch backend required by Whisper (includes CUDA support for GPU acceleration)
+- **pyannote.audio** - Speaker diarization pipeline (requires Hugging Face token)
+- **opencv-python (cv2)** - Video frame extraction for Zoom name OCR
+- **easyocr** - OCR engine for reading Zoom participant names from video frames
 
 **System Dependencies:**
 - **ffmpeg** - Must be installed separately (not in requirements.txt), checked at runtime with helpful per-OS install instructions
@@ -124,11 +135,11 @@ finally:
 - Remove in finally block to ensure cleanup even on errors
 
 ### Output Format Strategy
-Each format has a dedicated save function with format-specific logic:
-- **TXT**: Plain text only (`result['text']`)
-- **SRT**: Subtitles with 1-indexed sequence numbers, HH:MM:SS,mmm timestamps
-- **VTT**: WebVTT with header ("WEBVTT\n\n"), HH:MM:SS.mmm timestamps (note: period not comma)
-- **JSON**: Full metadata including segments array with timing, detected language, model used
+Each format has a dedicated save function with format-specific logic. All formats include optional speaker labels when diarization is enabled:
+- **TXT**: Timestamped lines with speaker labels: `[HH:MM:SS] Speaker: text`
+- **SRT**: Subtitles with 1-indexed sequence numbers, HH:MM:SS,mmm timestamps, speaker-prefixed text
+- **VTT**: WebVTT with header ("WEBVTT\n\n"), HH:MM:SS.mmm timestamps (note: period not comma), speaker-prefixed text
+- **JSON**: Full metadata including segments array with timing, speaker labels, detected language, model used
 
 ### CLI Design Principles
 - **Sensible defaults**: base model, txt format, auto-detect language, same filename with new extension
@@ -158,12 +169,21 @@ Each format has a dedicated save function with format-specific logic:
 
 ## Known Limitations and Future Improvements
 
+### Torch Load Monkey-Patch
+The code patches `torch.load` at import time to force `weights_only=False` for compatibility with PyTorch 2.6+ and pyannote model loading. This is at the top of the import block.
+
+### Zoom OCR Optimizations
+The `extract_zoom_names` function uses three strategies to minimize OCR processing time:
+1. **Bottom 20% crop** — Only scans the lower portion of each frame where Zoom name labels appear
+2. **15-second sampling interval** — Names rarely change mid-meeting, so infrequent sampling suffices
+3. **Early stopping** — Stops scanning once the same set of names appears consistently across 3 consecutive samples
+
 ### Current Limitations
 - **No batch processing**: Single file per invocation (could add glob pattern support)
 - **No progress bars**: Whisper handles progress internally (could expose with verbose flag)
 - **Limited video format validation**: Only checks file extension, not actual codec
 - **No resume capability**: Failed transcriptions must restart from beginning
-- **No speaker diarization**: Cannot identify different speakers in the audio
+- **Zoom name-to-speaker mapping is positional**: OCR names are mapped to SPEAKER_XX by frequency order, not by voice matching
 - **CPU-only is slow**: Large files on CPU can take 30+ minutes
 
 ### Potential Enhancements
@@ -171,5 +191,5 @@ Each format has a dedicated save function with format-specific logic:
 - Add `--verbose` flag to show Whisper's internal progress
 - Validate video codec using ffmpeg.probe() before extraction
 - Add `--resume` flag with checkpoint saving for long transcriptions
-- Add `--diarize` flag using pyannote.audio for speaker identification
+- Add `--speaker-names` flag to manually specify speaker name mappings
 - Add quality presets (fast/balanced/accurate) that auto-select model and settings
