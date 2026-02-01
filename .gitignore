@@ -37,6 +37,22 @@ wheels/
 *.swo
 *~
 
+# Video/audio files
+*.mp4
+*.mov
+*.avi
+*.mkv
+*.m4a
+
+# Transcription output
+*.txt
+*.srt
+*.vtt
+
+# Claude Code
+.claude/
+
 # OS
 .DS_Store
 Thumbs.db
+desktop.ini
