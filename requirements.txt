@@ -2,3 +2,7 @@ openai-whisper
 ffmpeg-python
 torch
 torchaudio
+pyannote.audio
+opencv-python
+easyocr
+pillow
