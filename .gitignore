@@ -52,6 +52,12 @@ wheels/
 # Claude Code
 .claude/
 
+# Binaries
+cloudflared.exe
+
+# Temp output files
+temp/
+
 # OS
 .DS_Store
 Thumbs.db
