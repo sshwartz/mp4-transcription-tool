@@ -235,6 +235,28 @@ If you see "GPU Not Available", you may need to:
 2. Install CUDA toolkit (11.8 or compatible)
 3. Reinstall PyTorch with CUDA support: `pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118`
 
+## Web Interface
+
+A browser-based UI is available via Gradio:
+
+```bash
+python app.py
+```
+
+This launches a local web server and a Cloudflare tunnel, making the app available at **https://transcribe.aiperspectives.com**.
+
+**Features:**
+- **Job Queue**: Multiple transcription requests are queued and processed serially
+- **Queue Status**: Each job shows its status (Queued, Processing, Done, Cancelled, Error) with per-job Cancel, Download Transcript, and Delete buttons
+- **Auto-refresh**: Queue display updates automatically every 2 seconds
+- **Settings**: Save/load settings via native file dialogs; settings persist to `settings.json`
+- **OCR Speaker Names**: Single checkbox to enable speaker diarization + OCR name extraction from video frames
+- **Test Mode**: Process only the first 3 minutes for quick testing
+
+Use the **Save Settings** button to persist your preferences (model, format, language, HF token, checkboxes) to `settings.json`. Settings are loaded automatically on next launch.
+
+**Note**: The HF token is stored in plaintext in `settings.json`. This is intended for personal/local use only.
+
 ## Command Reference
 
 ```

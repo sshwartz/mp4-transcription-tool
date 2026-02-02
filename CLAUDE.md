@@ -186,6 +186,31 @@ The `extract_zoom_names` function uses three strategies to minimize OCR processi
 - **Zoom name-to-speaker mapping is positional**: OCR names are mapped to SPEAKER_XX by frequency order, not by voice matching
 - **CPU-only is slow**: Large files on CPU can take 30+ minutes
 
+### Web Interface (Gradio)
+`app.py` provides a Gradio-based web UI that imports functions from `transcribe.py`. Run with `python app.py`.
+
+**Architecture:**
+- **Job Queue**: Uses `queue.Queue` with a background daemon worker thread for serial processing
+- **Job State**: Each job is a dict with id, filename, status, result, per-job `threading.Event` cancel flag, and all pipeline parameters
+- **`_job_list`** (list of dicts) + `_job_list_lock` (threading.Lock) for thread-safe access
+- **`@gr.render`** dynamically creates per-job rows with Cancel/Download/Delete buttons
+- **`gr.Timer(value=2)`** auto-refreshes queue display and transcript output
+- **`gr.DownloadButton`** for direct file downloads from completed jobs
+- **Cloudflare Tunnel**: `cloudflared.exe` (local binary) creates a named tunnel to `transcribe.aiperspectives.com`
+- **Output files**: Stored in `temp/` directory as `temp_output1.txt`, `temp_output2.txt`, etc.
+- **Settings**: Persisted to `settings.json` (loaded on startup). The HF token is stored in plaintext — personal use only.
+
+**Key functions in app.py:**
+- **`queue_video()`** — Adds a job to the queue, returns immediately
+- **`_worker()`** — Background thread that pulls jobs and runs `_run_job()`
+- **`_run_job(job)`** — Executes the full transcription pipeline for a single job
+- **`cancel_job(job_id_str)`** — Sets cancel event; marks queued jobs immediately
+- **`delete_job(job_id_str)`** — Removes a job from the list (cancels if active)
+- **`get_queue_snapshot()`** — Returns serializable job list for `gr.State`
+- **`refresh_status()`** — Called by timer to update queue and transcript displays
+
+**Single OCR checkbox**: "Use OCR to Add Speaker Names" controls both diarization and OCR name extraction. When unchecked, neither diarization nor OCR runs.
+
 ### Potential Enhancements
 - Add `--batch` flag to process multiple files with glob patterns
 - Add `--verbose` flag to show Whisper's internal progress
